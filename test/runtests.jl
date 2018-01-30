@@ -1,5 +1,6 @@
-using BackgroundSegmenter
 using Base.Test
+using BackgroundSegmenter
 
-# write your own tests here
-@test 1 == 2
+include("test_mixture.jl")
+include("test_components.jl")
+include("test_mincut.jl")
