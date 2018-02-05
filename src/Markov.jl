@@ -1,17 +1,17 @@
 struct MarkovModel
     background :: Array{MixtureModel, 2}
-    clique_potential :: Float64
-    function MarkovModel(n::Int, m::Int, kernels=5, clique_potential=2.0)
+    cut::MinCut
+    function MarkovModel(G, kernels=5, smoothing=2.0)
+        (n, m) = size(G)
+        cut = MinCut(zeros(Float64, n, m),
+                     VARIANCE_THRESHOLD,
+                     smoothing * VARIANCE_THRESHOLD)
         M = [MixtureModel(kernels) for i in 1:n, j in 1:m]
-        new(M, clique_potential)
+        new(M, cut)
     end
 end
 
 function apply!(M::MarkovModel, image)
-    (n, m) = size(image)
-    G = ones(Float64, n, m, 6)
-    G[:, :, 1:4] = M.clique_potential * INITIAL_VARIANCE 
-    G[:, :, 6] = INITIAL_VARIANCE
-    G[:, :, 5] = bg_energy!.(M.background, image)
-    segment(G)
+    update!(M.cut, bg_energy!.(M.background, image))
+    segment!(M.cut)
 end

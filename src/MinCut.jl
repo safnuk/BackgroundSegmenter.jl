@@ -1,94 +1,178 @@
 using DataStructures
 using IterTools
+import Base.length
+import Base.size
 
-GridGraph = Array{Float64, 3}
-Node = Tuple{Int64, Int64}
+GridGraph = Array{Float64, 2}
+
+Node = Int64
 Edge = Tuple{Node, Node}
 Path = Vector{Node}
 
-const _SOURCE = -2 
-const SOURCE = (_SOURCE, _SOURCE)
-const _SINK = -1
-const SINK = (_SINK, _SINK)
-const _NULL = 0
-const NULL = (_NULL, _NULL)
+const SOURCE = 1 
+const SINK = 2
+const NULL = 0
 
 struct MinCut
-    orphans::Set
-    active::Queue
-    tree::DefaultDict{Node, Int}
-    parent::DefaultDict{Node, Node}
+    orphans::Set{Node}
+    active::OrderedSet{Node}
+    tree::Vector{Node}
+    parent::Vector{Node}
+    edges::Array{Node, 2}
+    weights::Array{Float64, 2}
+    _n::Int
+    _m::Int
 
-    function MinCut() 
+    function MinCut(G::GridGraph, sink, node) 
+        num_nodes = length(G) + 2
         orphans = Set{Node}()
-        active = Queue(Node)
-        enqueue!(active, SOURCE)
-        enqueue!(active, SINK)
-        tree = DefaultDict{Node, Int}(_NULL)
-        parent = DefaultDict{Node, Node}(NULL)
-        tree[SOURCE] = _SOURCE
-        tree[SINK] = _SINK
-        new(orphans, active, tree, parent)
+        active = OrderedSet{Node}([SINK])
+        for k in 3:num_nodes
+            push!(active, k)
+        end
+        tree = Vector{Node}(num_nodes)
+        tree[:] = SOURCE
+        tree[SINK] = SINK
+        parent = Vector{Node}(num_nodes)
+        parent[:] = SOURCE
+        parent[SOURCE] = NULL
+        parent[SINK] = NULL
+        (edges, weights) = build_edges(G, sink, node)
+        (n, m) = size(G)
+        new(orphans, active, tree, parent, edges, weights, n, m)
     end
 end
 
-function segment(G::GridGraph)
-    cut = mincut(G)
-    (n, m, k) = size(G)
-    fgbg = zeros(UInt8, n, m)
+size(cut::MinCut) = (cut._n, cut._m)
+length(cut::MinCut) = length(cut.tree)
+
+function build_edges(G::GridGraph, sink, node)
+    offsets = [(-1, 0), (0, -1), (1, 0), (0,1)]
+    (n, m) = size(G)
+    num_nodes = n * m + 2
+    weights = Array{Float64, 2}(num_nodes, 6)
+    edges = zeros(Node, num_nodes, 6)
+    weights[:, 3:6] = node
+    weights[3:end, SOURCE] = reshape(G, n*m)
+    weights[3:end, SINK] = sink
+    weights[1:2, 1:2] = 0.0
+    edges[:, SOURCE] = SOURCE
+    edges[:, SINK] = SINK
     for i in 1:n, j in 1:m
-        if cut.tree[(i,j)] == _SOURCE
-            fgbg[i, j] = zero(UInt8)
+        k = linearize((i, j), n)
+        multi_idx = [(i, j) .+ x for x in offsets]
+        multi_idx = [(r, s) for (r, s) in multi_idx if
+                     r >= 1 && s >= 1 && r <= n && s <= m]
+        idx = linearize.(multi_idx, n)
+        edges[k, 3:length(idx)+2] = idx
+        weights[k, length(idx)+3:end] = 0.0
+        for (q, (r, s)) in enumerate(multi_idx)
+            if r < 1 || s < 1 || r > n || s > m
+                weights[k, q+2] = 0
+            end
+        end
+    end
+    return (edges, weights)
+end
+
+linearize(idx, n) = idx[1] + (idx[2]-1)*n + 2
+
+function update!(cut::MinCut, source::GridGraph)
+    cut.weights[3:end, SOURCE] = reshape(source, length(source))
+end
+
+function segment!(cut::MinCut)
+    mincut!(cut)
+    (n, m) = size(cut)
+    fgbg = zeros(UInt8, n, m)
+    for i in 1:length(fgbg)
+        if cut.tree[i+2] == SOURCE
+            fgbg[i] = zero(UInt8)
         else
-            fgbg[i, j] = one(UInt8)
+            fgbg[i] = one(UInt8)
         end
     end
     return fgbg
 end
 
-function mincut(G::GridGraph)
-    cut = MinCut()
+function mincut!(cut::MinCut)
     while true
-    #for n in 1:5
-        path = grow!(cut, G)
+        path = grow!(cut)
         if length(path) == 0
             return cut
         end
-        augment!(cut, G, path)
-        adopt!(cut, G)
+        augment!(cut, path)
+        adopt!(cut)
     end
 end
 
-function grow!(cut::MinCut, G::GridGraph)
+function grow!(cut::MinCut)
     while length(cut.active) > 0
-        p = front(cut.active)
-        for q in neighbors(G, p)
-            if tree_capacity(cut, G, p, q) < eps()
-                continue
-            elseif cut.tree[q] == _NULL
+        # get the first item in the queue
+        state = start(cut.active)
+        (p, state) = next(cut.active, state)
+        for q in viable_neighbors(cut, p)
+            if cut.tree[q] == NULL
                 cut.tree[q] = cut.tree[p]
                 cut.parent[q] = p
-                enqueue!(cut.active, q)
+                push!(cut.active, q)
             elseif cut.tree[q] != cut.tree[p]
-                # should we dequeue p before this?
                 return trace_path(cut, p, q)
             end
         end
-        dequeue!(cut.active)
+        delete!(cut.active, p)
     end
     return Path(0)
 end
 
-function neighbors(G::GridGraph, p::Node)
-    (a, b) = p
-    (n, m) = size(G)
-    if p == SINK || p == SOURCE
-        return [(i, j) for i in 1:n, j in 1:m]
+function viable_neighbors(cut::MinCut, p::Node)
+    if p == SOURCE
+        # TODO: memoize this process
+        return filter(x -> cut.weights[x, SOURCE] > eps(), 3:length(cut))
+    elseif p == SINK
+        # TODO: memoize this process
+        return filter(x -> cut.weights[x, SINK] > eps(), 3:length(cut))
+    elseif cut.tree[p] == SOURCE
+        return [cut.edges[p, x] for x in [SINK; 3:6] if cut.weights[p, x] > eps()]
     else
-        possible = [(a+1, b), (a-1, b), (a, b-1), (a, b+1)]
-        filter!(x -> 1<=x[1] && x[1]<=n && 1<=x[2] && x[2]<=m, possible)
-        return [possible; SINK; SOURCE]
+        return [cut.edges[p, x] for x in [SOURCE; 3:6] if
+                cut.edges[p, x] > 0 && capacity(cut, cut.edges[p, x], p) > eps()]
     end
+end
+
+function neighbors(cut::MinCut, p::Node)
+    if p == SOURCE || p == SINK
+        return 3:length(cut)
+    else
+        m = 0
+        for m in 3:6
+            if cut.edges[p, m] == 0
+                return @view cut.edges[p, 1:m-1]
+            end
+        end
+        return @view cut.edges[p, :]
+    end
+end
+
+function capacity(cut::MinCut, p::Node, q::Node)
+    if p == SOURCE
+        idx = SOURCE
+        p = q
+    elseif q == SINK
+        idx = SINK
+    else
+        idx = edge_index(cut, p, q)
+    end
+    return cut.weights[p, idx]
+end
+
+function edge_index(cut::MinCut, p::Node, q::Node)
+    for (n, x) in enumerate(@view cut.edges[p, 3:end])
+        if x == q
+            return n + 2
+        end
+    end
+    @assert false
 end
 
 function trace_path(cut::MinCut, p::Node, q::Node)
@@ -112,82 +196,43 @@ function trace_to_root(cut::MinCut, p::Node)
     return path
 end
 
-function tree_capacity(cut::MinCut, G::GridGraph, p::Node, q::Node)
-    if cut.tree[p] == _SOURCE
-        return edge_weight(G::GridGraph, p, q)
-    else
-        return edge_weight(G::GridGraph, q, p)
-    end
-end
-
-function edge_weight(G::GridGraph, p::Node, q::Node)
-    (n, m, k) = weight_index(p, q)
-    if k < 0
-        return 0
-    else
-        return G[n, m, k]
-    end
-end
-
-function weight_index(p::Node, q::Node)
-    (x, y) = p
-    (z, w) = q
-    if p == SINK
-        return (z, w, -1)
-    elseif q == SOURCE
-        return (x, y, -1)
-    elseif p == SOURCE
-        return (z, w, 6)
-    elseif q == SINK
-        idx = 5 
-    elseif x < z
-        idx = 4
-    elseif x > z
-        idx = 2
-    elseif y < w
-        idx = 3
-    elseif y > w
-        idx = 1
-    end
-    return (x, y, idx)
-end
-
-function augment!(cut::MinCut, G::GridGraph, path::Path)
-    Δ = bottleneck_capacity(G, path)
-    saturated_edges = update_residual_capacity!(G, path, Δ)
+function augment!(cut::MinCut, path::Path)
+    Δ = bottleneck_capacity(cut, path)
+    saturated_edges = update_residual_capacity!(cut, path, Δ)
     for edge in saturated_edges
         (p, q) = edge
-        if cut.tree[p] != cut.tree[q] || cut.tree[p] == _NULL
+        if cut.tree[p] != cut.tree[q] || cut.tree[p] == NULL
             continue
-        elseif cut.tree[p] == _SOURCE == cut.tree[q]
+        elseif cut.tree[p] == SOURCE == cut.tree[q]
             cut.parent[q] = NULL
             push!(cut.orphans, q)
-        elseif cut.tree[p] == _SINK == cut.tree[q]
+        elseif cut.tree[p] == SINK == cut.tree[q]
             cut.parent[p] = NULL
             push!(cut.orphans, p)
         end
     end
 end
 
-function bottleneck_capacity(G::GridGraph, path::Path)
+function bottleneck_capacity(cut::MinCut, path::Path)
     state = start(path)
     (p, state) = next(path, state)
-    capacity = Inf
+    cap = Inf
     while !done(path, state)
         (q, state) = next(path, state)
-        capacity = min(capacity, edge_weight(G, p, q))
+        cap = min(cap, capacity(cut, p, q))
         p = q
     end
-    return capacity
+    @assert cap > 0
+    return cap
 end
 
-function update_residual_capacity!(G::GridGraph, path::Path, Δ::Float64)
+function update_residual_capacity!(cut::MinCut, path::Path, Δ::Float64)
     saturated = Queue(Edge)
     state = start(path)
     (p, state) = next(path, state)
     while !done(path, state)
         (q, state) = next(path, state)
-        if update_residual_capacity!(G, p, q, Δ) < eps()
+        if update_residual_capacity!(cut, p, q, Δ) < eps()
             enqueue!(saturated, (p, q))
         end
         p = q
@@ -195,65 +240,60 @@ function update_residual_capacity!(G::GridGraph, path::Path, Δ::Float64)
     return saturated
 end
 
-function update_residual_capacity!(G::GridGraph, p::Node, q::Node, Δ::Float64)
-    (n, m, k) = weight_index(q, p)
-    if k > 0
-        G[n, m, k] += Δ
+function update_residual_capacity!(cut::MinCut, p::Node, q::Node, Δ::Float64)
+    if p == SOURCE
+        cut.weights[q, SOURCE] -= Δ
+        return cut.weights[q, SOURCE]
+    elseif q == SINK
+        cut.weights[p, SINK] -= Δ
+        return cut.weights[p, SINK]
     end
-    (n, m , k) = weight_index(p, q)
-    if k > 0
-        G[n, m ,k] -= Δ
-        return G[n, m, k]
-    else
-        return 0.0
-    end
+    idx = edge_index(cut, p, q)
+    opp_idx = edge_index(cut, q, p)
+    cut.weights[q, opp_idx] += Δ
+    cut.weights[p, idx] -= Δ
 end
 
-function adopt!(cut::MinCut, G::GridGraph)
+function adopt!(cut::MinCut)
     while !isempty(cut.orphans)
         p = pop!(cut.orphans)
-        attempt_tree_graft!(cut, G, p)
+        attempt_tree_graft!(cut, p)
     end
 end
 
-function attempt_tree_graft!(cut::MinCut, G::GridGraph, p::Node)
-    for q in neighbors(G, p)
-        if isvalid_parent_of(cut, G, q, p)
+function attempt_tree_graft!(cut::MinCut, p::Node)
+    neighborhood = neighbors(cut, p)
+    for q in neighborhood
+        if isvalid_parent_of(cut, q, p)
             cut.parent[p] = q
             return
         end
     end
-    for q in filter(x-> cut.tree[x] == cut.tree[p], neighbors(G, p))
-        if tree_capacity(cut, G, q, p) > 0
-            enqueue!(cut.active, q)
+    for q in filter(x-> cut.tree[x] == cut.tree[p], neighborhood)
+        if has_capacity(cut, q, p)
+            push!(cut.active, q)
         end
         if cut.parent[q] == p
             push!(cut.orphans, q)
             cut.parent[q] = NULL
         end
     end
-    cut.tree[p] = _NULL
-    remove!(cut.active, p)
+    cut.tree[p] = NULL
+    delete!(cut.active, p)
 end
 
-function remove!(q::Queue{T}, node::T) where T
-    p = Queue(T)
-    while !isempty(q)
-        r = dequeue!(q)
-        if r != node
-            enqueue!(p, r)
-        end
+function has_capacity(cut::MinCut, p::Node, q::Node)
+    if cut.tree[p] == SOURCE
+        return capacity(cut, p, q) > eps()
+    else
+        return capacity(cut, q, p) > eps()
     end
-    for r in p
-        enqueue!(q, r)
-    end
-    return q
 end
 
-function isvalid_parent_of(cut::MinCut, G::GridGraph, q::Node, p::Node)
+function isvalid_parent_of(cut::MinCut, q::Node, p::Node)
     if cut.tree[q] != cut.tree[p]
         return false
-    elseif tree_capacity(cut, G, q, p) < eps()
+    elseif !has_capacity(cut, q, p)
         return false
     else
         orig = origin(cut, q)
