@@ -15,3 +15,12 @@ function apply!(M::MarkovModel, image)
     update!(M.cut, bg_energy!.(M.background, image))
     segment!(M.cut)
 end
+
+function apply_mrf!(cut, background, image, smoothing=2.0)
+    energy = bg_energy!.(background, image)
+    reset!(cut, energy,
+        VARIANCE_THRESHOLD,
+        smoothing * VARIANCE_THRESHOLD
+    )
+    segment!(cut)
+end

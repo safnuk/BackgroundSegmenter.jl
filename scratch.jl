@@ -1,5 +1,9 @@
-using BackgroundSegmenter
+__precompile__()
+
+using ImageView
 using PyCall
+
+using BackgroundSegmenter
 
 @pyimport numpy as np
 
@@ -13,7 +17,7 @@ function fgbg_mog(infile, outfile, k=5)
     end
     np.save(outfile, fgbg)
 end
-        
+
 function load(infile, limit=0)
     V = np.load(infile)
     (t, n, m) = size(V)
@@ -29,7 +33,8 @@ function fgbg_markov(infile, outfile, k=5, limit=0)
     V = np.load(infile)
     (t, n, m) = size(V)
 
-    mm = MarkovModel(n, m, k, 2.0)
+    # mm = MarkovModel(n, m, k, 2.0)
+    M = [MixtureModel(k) for i in 1:n, j in 1:m]
     fgbg = zeros(V)
     for i in 1:t
         fgbg[i, :, :] = apply!(mm, @view V[i, :, :])
@@ -37,10 +42,21 @@ function fgbg_markov(infile, outfile, k=5, limit=0)
     np.save(outfile, fgbg)
 end
 
-V = load("data/lamprey1.npy", 20);
-mm = MarkovModel(V[1,:,:], 5);
-fgbg = zeros(V);
-@time fgbg[1, :, :] = apply!(mm, @view V[1, :, :])
-for i in 1:t
-    fgbg[i, :, :] = apply!(mm, @view V[i, :, :])
+
+function time_results(V, fgbg, cut, mm, i)
+    @time fgbg[i, :, :] = label_components(apply_mrf!(cut, mm, V[i, :, :], 4.0), 8)
 end
+
+V = load("data/lamprey2.npy");
+V = V[1:10, 300:450, 150:400]
+fgbg = zeros(V);
+(t, n, m) = size(V)
+mm =  [MixtureModel(5) for i in 1:n, j in 1:m];
+cut = MinCut(n, m);
+
+for i in 1:10
+    time_results(V, fgbg, cut,  mm, i)
+end
+
+A = V .* fgbg
+imshow(A)
