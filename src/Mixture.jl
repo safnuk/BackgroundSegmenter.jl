@@ -1,9 +1,10 @@
 import Base
 
 const NOISE_SIGMA = 15.0
-const INITIAL_VARIANCE = NOISE_SIGMA^2
-const MIN_VARIANCE = 2.0
-const BACKGROUND_RATIO = 0.90
+const INITIAL_VARIANCE = 4NOISE_SIGMA^2
+# const MIN_VARIANCE = NOISE_SIGMA^2
+const MIN_VARIANCE = 5.0^2
+const BACKGROUND_RATIO = 0.7
 const INITIAL_WEIGHT = .05
 const VARIANCE_THRESHOLD = 2.5^2
 const INITIALIZATION_WINDOW = 200
@@ -80,10 +81,14 @@ function apply!(M::MixtureModel, x) :: UInt8
         k = replace_kernel_at!(k, M, kernel)
     end
     weight_sum = 0.0
+    average = 0.0
     for n in 1:k-1
         weight_sum += M[n].ω
+        average += M[n].ω * M[n].μ
     end
     if weight_sum < M.background_threshold
+        return zero(UInt8)
+    elseif x < average
         return zero(UInt8)
     else
         return one(UInt8)
@@ -93,15 +98,21 @@ end
 function bg_energy!(M::MixtureModel, x) :: Float64
     energy = Inf
     weight_sum = 0.0
+    average = 0.0
     apply!(M, x)
     for kernel in M
         weight_sum += kernel.ω
+        average += kernel.ω * kernel.μ
         energy = min(neglog_likelihood(x, kernel), energy)
         if weight_sum >= M.background_threshold
-            return energy
+            break
         end
     end
-    return energy
+    if x < average
+        return min(energy, 0.9 * M.threshold)
+    else
+        return energy
+    end
 end
 
 function update!(M::MixtureModel, matched_pos, x, λ)

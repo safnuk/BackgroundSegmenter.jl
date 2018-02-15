@@ -20,8 +20,14 @@ struct MinCut
     parent::Vector{Node}
     edges::Array{Node, 2}
     weights::Array{Float64, 2}
+    timestamps::Vector{Int}
+    distances::Vector{Int}
+    current_time::Int
     _n::Int
     _m::Int
+    _p1::HalfPath
+    _p2::HalfPath
+    saturated::HalfPath
 
     function MinCut(n, m)
         num_nodes = n * m + 2
@@ -31,7 +37,9 @@ struct MinCut
         parent = Vector{Node}(num_nodes)
         weights = Array{Float64, 2}(num_nodes, 6)
         edges = build_edges(n, m)
-        new(orphans, active, tree, parent, edges, weights, n, m)
+        times = zeros(Int, num_nodes)
+        distances = zeros(Int, num_nodes)
+        new(orphans, active, tree, parent, edges, weights, times, distances, 0, n, m, HalfPath(), HalfPath(), HalfPath())
     end
 end
 
@@ -194,9 +202,10 @@ function edge_index(cut::MinCut, p::Node, q::Node)
 end
 
 function trace_path(cut::MinCut, p::Node, q::Node)
-    # TODO: Change to linked lists (faster join)
-    q_path = trace_to_root(cut, q)
-    p_path = trace_to_root(cut, p)
+    empty!(cut._p1)
+    empty!(cut._p2)
+    q_path = trace_to_root!(cut._p1, cut, q)
+    p_path = trace_to_root!(cut._p2, cut, p)
     if back(q_path) == SOURCE
         return Path(q_path, p_path)
     else
@@ -204,8 +213,7 @@ function trace_path(cut::MinCut, p::Node, q::Node)
     end
 end
 
-function trace_to_root(cut::MinCut, p::Node)
-    path = HalfPath()
+function trace_to_root!(path::HalfPath, cut::MinCut, p::Node)
     enqueue!(path, p)
     parent = cut.parent[p]
     while parent != NULL
@@ -217,9 +225,10 @@ end
 
 function augment!(cut::MinCut, path::Path)
     Δ = bottleneck_capacity(cut, path)
-    saturated_edges = update_residual_capacity!(cut, path, Δ)
-    for edge in saturated_edges
-        (p, q) = edge
+    update_residual_capacity!(cut, path, Δ)
+    while !isempty(cut.saturated)
+        p = dequeue!(cut.saturated)
+        q = dequeue!(cut.saturated)
         if cut.tree[p] != cut.tree[q] || cut.tree[p] == NULL
             continue
         elseif cut.tree[p] == SOURCE == cut.tree[q]
@@ -245,17 +254,15 @@ function bottleneck_capacity(cut::MinCut, path::Path)
 end
 
 function update_residual_capacity!(cut::MinCut, path::Path, Δ::Float64)
-    saturated = Queue(Edge)
     state = start(path)
     (p, state) = next(path, state)
     while !done(path, state)
         (q, state) = next(path, state)
         if update_residual_capacity!(cut, p, q, Δ) < eps()
-            enqueue!(saturated, (p, q))
+            push!(cut.saturated, p, q)
         end
         p = q
     end
-    return saturated
 end
 
 function update_residual_capacity!(cut::MinCut, p::Node, q::Node, Δ::Float64)

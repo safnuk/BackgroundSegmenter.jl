@@ -27,7 +27,7 @@ out = apply!(model, 0)
 @test model[2].ω < 0.25
 @test model[3].ω < 0.24
 
-model = MixtureModel([Gaussian(0, 4, 1), Gaussian(30, 4, 0.5), Gaussian(70, 4, 0.48), Gaussian(120, 4, .02)])
+model = MixtureModel([Gaussian(0, 4, 1), Gaussian(30, 4, 0.5), Gaussian(100, 4, 0.48), Gaussian(120, 4, .02)])
 model.number_frames = 200
 out = apply!(model, 120)
 @test out == 1
@@ -36,9 +36,10 @@ out = apply!(model, 120)
 @test model[3].ω < 0.24
 @test model[4].ω > 0.01
 @test bg_energy!(model, 30) == 0
-@test bg_energy!(model, 120) ≈ neglog_likelihood(120, model[3])
+@test bg_energy!(model, 80) ≈ neglog_likelihood(80, model[3])
+@test bg_energy!(model, 120) ≈ neglog_likelihood(120, model[2])
 
-bg_input = [0x90 0x30 ; 0x70 0x120]
+bg_input = [0x90 0x10 ; 0x50 0x120]
 fg_input = [0x30 0x70; 0x120 0x20]
 output = [0x0 0x0; 0x0 0x0]
 model = [MixtureModel(3) for i in 1:2, j in 1:2]
@@ -48,4 +49,4 @@ for i in 1:BackgroundSegmenter.INITIALIZATION_WINDOW
 end
 @test output == [0x0 0x0; 0x0 0x0]
 output .= apply!.(model, fg_input)
-@test output == [0x1 0x1; 0x1 0x1]
+@test output == [0x0 0x1; 0x1 0x0]

@@ -1,13 +1,15 @@
 using DataStructures
-import DataStructures: enqueue!, reverse_iter, back
+import DataStructures: dequeue!, enqueue!
 import Base: length, next, start, done
 
-struct HalfPath
-    q::Queue{Int}
-    HalfPath() = new(Queue(Int))
-end
+# struct HalfPath
+#     q::Queue{Int}
+#     HalfPath() = new(Queue(Int))
+# end
+HalfPath = Deque{Int}
 
-@DataStructures.delegate HalfPath.q [length, back, enqueue!, next, start, done, reverse_iter]
+enqueue!(p::HalfPath, x::Int) = push!(p, x)
+dequeue!(p::HalfPath) = shift!(p)
 
 struct Path
     head::HalfPath
