@@ -13,7 +13,7 @@ const SOURCE = 1
 const SINK = 2
 const NULL = 0
 
-struct MinCut
+mutable struct MinCut
     orphans::Set{Node}
     active::ActiveQueue
     tree::Vector{Node}
@@ -58,23 +58,27 @@ function reset!(cut::MinCut, G::GridGraph, sink, node)
     cut.weights[3:end, SOURCE] = reshape(G, cut._n*cut._m)
     cut.weights[3:end, SINK] = sink
     cut.weights[1:2, 1:2] = 0.0
+    cut.timestamps[:] = 1
     for k in 3:length(cut)
         if cut.weights[k, SOURCE] < cut.weights[k, SINK] - eps()
             cut.weights[k, SINK] -= cut.weights[k, SOURCE]
             cut.weights[k, SOURCE] = 0.0
             cut.tree[k] = SINK
             cut.parent[k] = SINK
+            cut.distances[k] = 1
         elseif cut.weights[k, SOURCE] > cut.weights[k, SINK] + eps()
             cut.weights[k, SOURCE] -= cut.weights[k, SINK]
             cut.weights[k, SINK] = 0.0
             cut.tree[k] = SOURCE
             cut.parent[k] = SOURCE
             enqueue!(cut.active, k)
+            cut.distances[k] = 1
         else
             cut.weights[k, SOURCE] = 0.0
             cut.weights[k, SINK] = 0.0
             cut.tree[k] = NULL
             cut.parent[k] = NULL
+            cut.distances[k] = -1
         end
     end
     return cut
@@ -280,6 +284,7 @@ function update_residual_capacity!(cut::MinCut, p::Node, q::Node, Δ::Float64)
 end
 
 function adopt!(cut::MinCut)
+    cut.current_time += 1
     while !isempty(cut.orphans)
         p = pop!(cut.orphans)
         attempt_tree_graft!(cut, p)
@@ -322,14 +327,29 @@ function isvalid_parent_of(cut::MinCut, q::Node, p::Node)
     elseif !has_capacity(cut, q, p)
         return false
     else
-        orig = origin(cut, q)
-        return orig == SOURCE || orig == SINK
+        d = distance_to_origin!(cut, q)
+        return d >= 0
     end
 end
 
-function origin(cut::MinCut, p::Node)
-    while cut.parent[p] != NULL
-        p = cut.parent[p]
+function distance_to_origin!(cut::MinCut, p::Node)
+    # TODO: Eliminate recursion?
+    if cut.timestamps[p] == cut.current_time
+        return cut.distances[p]
     end
-    return p
+    cut.timestamps[p] = cut.current_time
+    if p == SOURCE || p == SINK
+        return 0
+    elseif cut.parent[p] == NULL
+        cut.distances[p] = -1
+        return -1
+    else
+        d = distance_to_origin!(cut, cut.parent[p])
+        if d < 0
+            cut.distances[p] = d
+        else
+            cut.distances[p] = d + 1
+        end
+    end
+    return cut.distances[p]
 end
