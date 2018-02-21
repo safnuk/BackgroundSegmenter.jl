@@ -35,9 +35,9 @@ function apply(f::Filter, w::Array{T, 3}) where {T}
     end
     for (idx, x) in enumerate(result)
         if x < f.threshold
-            result[idx] = 0.5 * x
+            result[idx] = 0.0
         else
-            result[idx] = 0.5(1 + x)
+            result[idx] = 1.0
         end
     end
     return result
