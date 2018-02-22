@@ -26,8 +26,9 @@ neglog_likelihood(K::Gaussian, x) = (x - K.μ)^2 / K.σ²
 
 Base.:*(K::Gaussian, x) = Gaussian(K.μ, K.σ², K.ω * x, K.sortkey * x)
 Base.:*(x, K::Gaussian) = K * x
+Base.:/(K::Gaussian, x) = Gaussian(K.μ, K.σ², K.ω / x, K.sortkey / x)
 
-mutable struct MixtureParams
+struct MixtureParams
     threshold :: Float64
     background_threshold :: Float64
     learning_rate :: Float64
@@ -36,17 +37,17 @@ end
 
 MixtureParams() = MixtureParams(VARIANCE_THRESHOLD, BACKGROUND_RATIO, 1.0, 0)
 
-function increment_frames!(p::MixtureParams)
-    p.number_frames += 1
+function increment_frames(p::MixtureParams)
     if p.number_frames > INITIALIZATION_WINDOW
-        p.learning_rate = MIN_LEARNING_RATE
+        return MixtureParams(p.threshold, p.background_threshold,
+                             MIN_LEARNING_RATE, p.number_frames+1)
     else
-        p.learning_rate = 1 / (p.number_frames + 1)
+        return MixtureParams(p.threshold, p.background_threshold,
+                             1.0 / (p.number_frames + 2), p.number_frames+1)
     end
-    return p
 end
 
-struct MixtureModel
+mutable struct MixtureModel
     kernels::Array{Gaussian, 3}
     n::Int
     params::MixtureParams
@@ -65,26 +66,24 @@ MixtureModel(n::Int, m::Int) = MixtureModel(5, n, m)
 #Base.getindex(M::MixtureModel, i::Int) = Base.getindex(M.kernels, i)
 #Base.setindex!(M::MixtureModel, kernel::Gaussian, i::Int) = Base.setindex!(M.kernels, kernel, i)
 
-function normalize!(model; sort=true)
+function normalize!(M, idx)
     total_weight = 0.0
-    for kernel in model
-        total_weight += kernel.ω
+    n = size(M.kernels)[1]
+    for i in 1:n
+        total_weight += M.kernels[i, idx].ω
     end
-    for (i, kernel) in enumerate(model)
-        model[i] = kernel * (1 / total_weight)
+    for i in 1:n
+        M.kernels[i, idx] = M.kernels[i, idx] / total_weight
     end
-    if sort
-        sort!(model, rev=true)
-    end
-    return model
+    return M
 end
 
 function apply!(M::MixtureModel, input, output)
-    (rows, cols) = size(input)
-    for m in 1:cols, n in 1:rows
-        output[n, m] = _apply!((@view (M.kernels[:, n, m])), M.params, input[n, m])
+    for idx in CartesianRange(size(input))
+        x = input[idx]
+        output[idx] = _apply!(M, idx, x)
     end
-    increment_frames!(M.params)
+    M.params = increment_frames(M.params)
     return output
 end
 
@@ -93,30 +92,32 @@ function apply!(M::MixtureModel, input)
     return apply!(M, input, output)
 end
 
-function _apply!(M, params::MixtureParams, x)
+function _apply!(M::MixtureModel, idx, x)
     k = 0
+    n = size(M.kernels)[1]
     matched = false
-    τ = params.threshold
-    λ = params.learning_rate
-    for (k, kernel) in enumerate(M)
+    τ = M.params.threshold
+    λ = M.params.learning_rate
+    for k in 1:n
+        kernel = M.kernels[k, idx]
         if kernel.ω < eps() break end
         if neglog_likelihood(kernel, x) < τ
-            k = update!(M, k, x, λ)
+            k = update!(M, k, idx, x, λ)
             matched = true
             break
         end
     end
     if !matched
         kernel = Gaussian(x)
-        k = replace_kernel_at!(k, M, kernel)
+        k = replace_kernel_at!(k, idx, M, kernel)
     end
     weight_sum = 0.0
     average = 0.0
-    for n in 1:k-1
-        weight_sum += M[n].ω
-        average += M[n].ω * M[n].μ
+    for j in 1:k-1
+        weight_sum += M.kernels[j, idx].ω
+        average += M.kernels[j, idx].ω * M.kernels[j, idx].μ
     end
-    if weight_sum < params.background_threshold
+    if weight_sum < M.params.background_threshold
         return zero(x)
     elseif x < average
         return zero(x)
@@ -125,64 +126,69 @@ function _apply!(M, params::MixtureParams, x)
     end
 end
 
-function bg_energy!(M::MixtureModel, x)
-    result = Array{Float64}(size(x))
-    for (n, z) in enumerate(x)
-        result[n] = _bg_energy!((@view M.kernels[:, n]), M.params, z)
+function bg_energy!(M::MixtureModel, input)
+    output = Array{Float64}(size(input))
+    for idx in CartesianRange(size(input))
+        x = input[idx]
+        output[idx] = _bg_energy!(M, idx, x)
     end
-    increment_frames!(M.params)
-    return result
+    M.params = increment_frames(M.params)
+    return output
 end
 
-function _bg_energy!(M, params::MixtureParams, x)
+function _bg_energy!(M, idx, x)
     energy = Inf
     weight_sum = 0.0
     average = 0.0
-    _apply!(M, params, x)
-    for kernel in M
+    _apply!(M, idx, x)
+    n = size(M.kernels)[1]
+    for i in 1:n
+        kernel = M.kernels[i, idx]
         weight_sum += kernel.ω
         average += kernel.ω * kernel.μ
         energy = min(neglog_likelihood(kernel, x), energy)
-        if weight_sum >= params.background_threshold
+        if weight_sum >= M.params.background_threshold
             break
         end
     end
     if x < average
-        return min(energy, 0.9 * params.threshold)
+        return min(energy, 0.9 * M.params.threshold)
     else
         return energy
     end
 end
 
-function update!(M, matched_pos, x, λ)
-    for (n, K) in enumerate(M)
+function update!(M, matched_pos, idx, x, λ)
+    num_kernels = size(M.kernels)[1]
+    for n in 1:num_kernels
+        K = M.kernels[n, idx]
         if n == matched_pos
             μ = K.μ + λ*(x - K.μ)
             σ² = max((1-λ)*K.σ² + λ*(x - K.μ)^2, MIN_VARIANCE)
             ω = (1-λ) * K.ω + λ
-            M[n] =  Gaussian(μ, σ², ω)
+            M.kernels[n, idx] =  Gaussian(μ, σ², ω)
         else
-            M[n] = (1-λ) * K
+            M.kernels[n, idx] = (1-λ) * K
         end
     end
-    return move_kernel_into_order!(M, matched_pos)
+    return move_kernel_into_order!(M, matched_pos, idx)
 end
 
-function move_kernel_into_order!(M, k)
+function move_kernel_into_order!(M, k, idx)
     n = k
     for n in k-1:-1:1
-        if M[n].ω < M[n+1].ω
-            M[n], M[n+1] = M[n+1], M[n]
+        if M.kernels[n, idx].ω < M.kernels[n+1, idx].ω
+            M.kernels[n, idx], M.kernels[n+1, idx] = M.kernels[n+1, idx], M.kernels[n, idx]
         else
             n = n+1
             break
         end
     end
-    normalize!(M, sort=false)
+    normalize!(M, idx)
     return n
 end
 
-function replace_kernel_at!(k::Int, M, kernel::Gaussian)
-    M[k] = kernel
-    return move_kernel_into_order!(M, k)
+function replace_kernel_at!(k, idx, M, kernel::Gaussian)
+    M.kernels[k, idx] = kernel
+    return move_kernel_into_order!(M, k, idx)
 end

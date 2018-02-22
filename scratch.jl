@@ -22,7 +22,7 @@ end
 
 function time_results(V, fgbg, M, t)
     @time for i in 2:t
-        apply!(M, (@view V[:, :, i]), (@view fgbg[:, :, i]));
+        apply!(M, (view(V, :, :, i)), (view(fgbg, :, :, i)));
     end
 end
 
@@ -35,17 +35,27 @@ f3 = BackgroundSegmenter.Filter(5, 0.04);
 fgbg = zeros(V);
 (n, m, t) = size(V)
 M = MixtureModel(n, m);
-apply!(M, (@view V[:, :, 1]), (@view fgbg[:, :, 1]));
-time_results(V, fgbg, M, t)
+apply!(M, (view(V, :, :, 1)), (view(fgbg, :, :, 1)));
+time_results(V, fgbg, M, t);
 
-for i in 1:t
-    fgbg[i, :, :] .= filter_components(fgbg[i, :, :], 12)
+f = view(fgbg, 1, :, :);
+f = filter_components(f, 12);
+@time for i in 2:t
+    f = view(fgbg, i, :, :);
+    f = filter_components(f, 12);
 end
-@time fgbg .= filter_components(fgbg, 40);
-@time fgbg1 = apply(f1, fgbg);
-A0 = V;
-A1 = scale(V, fgbg1);
-guidict = imshow(hcat(A0, A1))
+@time fgbg = filter_components(fgbg, 40);
+# W = @view V[:, :, 2:end];
+# colors = distinguishable_colors(blobs+1);
+# components = Array{RGB{N0f8}}(size(fgbg));
+# for idx in eachindex(fgbg)
+#     components[idx] = colors[fgbg[idx]+1] * (W[idx] * 1.0/255.0);
+# end
+# imshow(components)
+# @time fgbg1 = apply(f1, fgbg);
+# A0 = V;
+# A1 = scale(V, fgbg1);
+# guidict = imshow(hcat(A0, A1))
 # @time fgbg2 = apply(f2, fgbg);
 # @time fgbg3 = apply(f3, fgbg);
 # A2 = scale(V, fgbg2);

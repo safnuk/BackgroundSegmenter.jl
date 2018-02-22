@@ -1,8 +1,16 @@
 using DataStructures
 
 function filter_components(input, min_size)
-    dims = length(size(input))
     output = zeros(Int64, size(input))
+    filter_components!(output, input, min_size)
+end
+
+function filter_components!(input, min_size)
+    filter_components!(input, input, min_size)
+end
+
+function filter_components!(output, input, min_size)
+    dims = length(size(input))
     sets = IntDisjointSets(0)
     sizes = counter(Int64)
     min_bound = CartesianIndex(ones(Int, dims)...)
@@ -32,22 +40,36 @@ function filter_components(input, min_size)
         root = find_root(sets, key)
         push!(sizes, root, reset!(sizes, key))
     end
+    labels = Dict{Int, Int}(-1 => 0)
     for idx in CartesianRange(size(input))
         if !is_fg(input[idx])
             continue
         end
         component = output[idx]
-        component_size = sizes[find_root(sets, component)]
+        root = find_root(sets, component)
+        component_size = sizes[root]
         if component_size < min_size
             output[idx] = 0
         else
-            output[idx] = 1
+            label = get_label!(labels, root)
+            output[idx] = label
         end
     end
     return output
 end
 
-is_fg(x) = x == one(x)
+is_fg(x) = x > zero(x)
+
+function get_label!(labels, key)
+    if haskey(labels, key)
+        return labels[key]
+    else
+        labels[-1] += 1
+        label = labels[-1]
+        labels[key] = label
+        return label
+    end
+end
 
 function neighbor_components(idx, labels, offsets, min_bound)
     components = []

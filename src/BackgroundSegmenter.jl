@@ -12,6 +12,7 @@ export
     enqueue!,
     Filter,
     filter_components,
+    filter_components!,
     front,
     Gaussian,
     GridGraph,
