@@ -1,5 +1,4 @@
 import Base
-using StaticArrays: SVector
 
 const NOISE_SIGMA = 15.0
 const INITIAL_VARIANCE = 4NOISE_SIGMA^2
