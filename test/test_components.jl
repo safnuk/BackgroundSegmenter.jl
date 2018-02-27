@@ -21,3 +21,8 @@ out = filter_components(C, 4)
 @test sum(out) == sum(C) - 5
 out = filter_components(C, 12)
 @test out == zeros(C)
+
+fgbg = filter_components(A, 3)
+out = components(fgbg)
+@test length(out) == 1
+@test size(out[1])[1] == 7

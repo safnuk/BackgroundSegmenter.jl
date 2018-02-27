@@ -7,6 +7,8 @@ export
     apply!,
     apply_mrf!,
     bg_energy!,
+    components,
+    components!,
     delete!,
     dequeue!,
     enqueue!,
