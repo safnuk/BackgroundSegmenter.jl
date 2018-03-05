@@ -18,6 +18,46 @@ function weights(n)
     return w
 end
 
+function morphological_close(w::AbstractArray{T, 2}, n=1) where {T}
+    out = zeros(w)
+    temp = zeros(w)
+    morphological_close!(out, temp, w, n)
+end
+
+function morphological_close!(out::AbstractArray{T, 2},
+                              temp::AbstractArray{T, 2},
+                              w::AbstractArray{T, 2}, n=1) where {T}
+    @assert size(out) == size(w) == size(temp)
+    (a, b) = size(w)
+    n = 3
+    for j in 1:b, i in 1:a
+        if w[i, j] == zero(T) 
+            continue 
+        end
+        h_start, h_end = calc_bounds(i, a, n)
+        w_start, w_end = calc_bounds(j, b, n)
+        for q in w_start:w_end, p in h_start:h_end
+            temp[i+p, j+q] = one(T)
+        end
+    end
+    for j in 1:b, i in 1:a
+        if temp[i, j] == zero(T) 
+            continue 
+        end
+        out[i, j] = one(T)
+        h_start, h_end = calc_bounds(i, a, n)
+        w_start, w_end = calc_bounds(j, b, n)
+        for q in w_start:w_end, p in h_start:h_end
+            if temp[i+p, j+q] == zero(T)
+                out[i, j] = zero(T)
+                break
+            end
+        end
+    end
+    return out
+end
+
+
 function apply(f::Filter, w::Array{T, 3}) where {T}
     result = zeros(Float64, size(w))
     (a, b, c) = size(w)

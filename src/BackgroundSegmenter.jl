@@ -25,6 +25,8 @@ export
     MixtureModel,
     MixtureParams,
     mincut,
+    morphological_close,
+    morphological_close!,
     neglog_likelihood,
     Path,
     reset!,
