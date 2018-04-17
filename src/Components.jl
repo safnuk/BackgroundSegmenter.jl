@@ -1,3 +1,4 @@
+using Clustering
 using DataStructures
 
 function filter_components(input, min_size)
@@ -9,12 +10,26 @@ function filter_components!(input, min_size)
     filter_components!(input, input, min_size)
 end
 
-function components(input)
-    output = zeros(Int64, size(input))
+function connected_components(input)
+    output = zeros(UInt8, size(input))
     components!(output, input)
 end
 
-function components!(output, input)
+function components(input; radius=5.0, min_neighbors=8, min_cluster_size=12)
+    blobs = Dict{Int, Array{Int}}()
+    fg_points = hcat(map(x -> collect(convert.(Float64, ind2sub(input, x))), find(input))...)
+    if size(fg_points, 2) < min_cluster_size
+        return blobs
+    end
+    C = dbscan(fg_points, radius; min_neighbors=min_neighbors, min_cluster_size=min_cluster_size)
+    for (label, x) in enumerate(C)
+        blobs[label] = (convert.(Int, fg_points[:, x.core_indices]))'
+    end
+    return blobs
+end
+
+
+function connected_components!(output, input)
     (sets, sizes) = first_pass_label_components!(output, input)
     labels = Dict{Int, Int}(-1 => 0)
     blobs = Dict{Int, Array{Int}}()

@@ -7,6 +7,7 @@ export
     apply!,
     apply_mrf!,
     bg_energy!,
+    cluster,
     components,
     components!,
     delete!,
